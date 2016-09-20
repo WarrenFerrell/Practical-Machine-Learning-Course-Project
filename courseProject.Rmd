@@ -1,0 +1,106 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Warren T. Ferrell"
+output: html_document
+---
+
+##Summary
+A subset of the wearables dataset from  http://groupware.les.inf.puc-rio.br/har 
+was used to create a prediction model for the type of exercise. Ultimately a 
+bagged tree algorithm was used to predict based on computation speed, and accuracy.
+```{r setup, include=FALSE}
+knitr::opts_chunk$set( echo=TRUE, warning=FALSE, message=FALSE)
+```
+
+###Data Prep
+Removed all variables that had NA or no data for at any point. Removed timestamp
+because although it could predict an exercise it would do so based on when the 
+exercise was performed; which is a useless prediction method if trying
+to predict future activities. Removal of these variables is supported by a call 
+to nearZeroVar that shows that no variable has near zero variance. Split the data
+60:40 into a training and test set.
+```{r dataPrep, cache=TRUE}
+library(caret); library(dplyr)
+dataRaw = read.csv("pml-training.csv", row.names = 1)
+badCols = apply(dataRaw, 2, function(x) anyNA(x) || "" %in% x )
+wholSet = dataRaw[ ,!badCols] %>% select(-contains("timestamp"),
+                -c(new_window, num_window)); rm(dataRaw)
+#length(nearZeroVar(wholSet)) == 0
+set.seed(419)
+inTran = createDataPartition(wholSet$classe, p = .6)[[1]]
+tranSet = wholSet[ inTran, ]  
+testSet = wholSet[-inTran, ]; rm(wholSet)
+```
+
+###Selecting a model
+Using 10-fold cross validation tested 4 prediction functions, classification tree,
+tree bagging, random forests (rf), and boosting (gbm). Random forest and boosting 
+took several minutes to compute so they are commented out in the code. Tree bagging
+was selected as the final model because computation time was under a minute and accuracy averaged
+over all 10 fold was .97 which differed only slightly from rf and gbm. The efficacy of a model 
+that specified the user was tested but did improve the results drastically and a model
+that doesn't need to be recalculated for each new user may be preferred.
+```{r modelSelect, echo = FALSE, cache=TRUE}
+fitControl <- trainControl(method = "cv", number = 10)
+set.seed(34834);
+model_treebag <- train( tranSet[,-54], tranSet[,54], method="treebag", trControl = fitControl)
+model_rpart <- train( tranSet[,-54], tranSet[,54], method="rpart" , trControl = fitControl)
+#model_rf <- train( tranSet[,-54], tranSet[,54] , method = "rf", prox = T)
+#model_gbm <- train( tranSet[,-54], tranSet[,54] , method = "gbm", verbose = F )
+carl <- tranSet[ tranSet$user_name == "carlitos", ]
+carl_rpart <- train( carl[,-54], carl[,54] , method = "rpart", trControl = fitControl)
+carl_treebag <- train( carl[,-54], carl[,54] , method = "treebag", trControl = fitControl)
+carl_rf <- train( carl[,-54], carl[,54] , method = "rf", prox = T, trControl = fitControl)
+carl_gbm <- train( carl[,-54], carl[,54] , method = "gbm", verbose = F, trControl = fitControl )
+```
+
+```{r results, echo = FALSE, results="asis"}
+library(xtable);
+results <- list(rpartOnTrain = model_rpart$results[1,-1], rpartOnCarl = carl_rpart$results[1,-1],
+        treebagOnTrain = model_treebag$results[1,-1], treebagOnCarl = carl_treebag$results[1,-1],
+        randomForestOnCarl = carl_rf$results[1,-1], gbmOnCarl = carl_gbm$results[1,-(1:4)])
+resultsdf <- do.call(rbind, lapply(seq_along(results), function(i){
+  data.frame(model=names(results)[[i]], results[[i]]) }))
+print( xtable(resultsdf,digits=3), type="html", include.rownames = FALSE)
+```
+
+###Efficacy of the model
+The out of sample error using the tree bagging model is estimated to be .026,
+based on its accuracy when applied to the test set.
+```{r efficacy, results="hold"}
+confusion <- caret::confusionMatrix(predict(model_treebag, testSet), testSet$classe)
+confusion$table
+confusion$overall
+```
+
+\pagebreak
+
+#Appendix
+
+###Code
+
+####Data Prep
+```{r dataPrep, echo = TRUE, eval = FALSE}
+```
+
+####Selecting a model
+```{r modelSelect, echo = TRUE, eval = FALSE}
+```
+
+```{r results, echo = TRUE, eval = FALSE}
+```
+
+####Efficacy of the model
+```{r efficacy, echo = TRUE, eval = FALSE}
+```
+
+```{r comp, include = FALSE}
+library(dplyr)
+testFile <- read.csv("pml-testing.csv", row.names = 1)
+testing <- testFile[ ,!badCols] %>% select(-contains("timestamp"),
+                -c(new_window, num_window)); rm(testFile)
+predict(model_treebag, testing)
+```
+
+###Sources
+http://stackoverflow.com/questions/7269496/write-a-list-of-lists-to-a-table-with-the-names-of-each-list-as-a-column
